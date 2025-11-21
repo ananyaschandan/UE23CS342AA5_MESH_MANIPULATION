@@ -114,5 +114,19 @@ constraint iterations    // Stiffness (more = stiffer cloth)
 - **Vanilla JavaScript**: Physics simulation and logic
 - **WebGL**: Hardware-accelerated graphics
 
+  ---
+
+## 👩‍💻 Contributors
+
+This project was created collaboratively by:
+
+- **Trishabalakrishna**
+- **Varhss04**  
+- **ananyaschandan**
+
+(Add their GitHub usernames once you add them as collaborators.)
+
+---
+
 ## License
 Open source - feel free to use and modify for your projects!
