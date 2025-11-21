@@ -1,0 +1,1147 @@
+Getting Started:
+Important: These simulations are designed to be experienced in sequence, showing progressive development of the cloth manipulation system:
+
+Start with: Large Sphere Pin - Basic cloth-pin interaction with visible collision detection
+Then try: Small Sphere Pin - Refined version with precise piercing mechanics
+Next: Cloth Snipping - Introduction to constraint-based cutting
+Finally: Complete Cloth Cutting - Full separation into two independent pieces
+
+Each iteration builds upon lessons learned from the previous one, demonstrating increasingly sophisticated mesh manipulation techniques.
+Simulations Included
+1. Cloth with Piercing Pin
+A blue cloth suspended at the top, interacting with a moving pin that can pierce through it. The pin consists of a spherical base and a sharp conical tip.
+Features:
+
+Particle-based cloth physics (30×30 grid)
+Verlet integration for realistic motion
+Constraint satisfaction for fabric cohesion
+Pin collision detection (only with the base sphere)
+Wind effects for natural movement
+Dynamic camera rotation
+
+Variants:
+
+Standard version with larger pin base (0.08 radius)
+Fine-tuned version with tiny pin base (0.015 radius) for more precise piercing
+
+2. Cloth Cutting Simulation
+A red cloth that gets sliced cleanly in half by a moving pin, with both halves falling independently under gravity.
+Features:
+
+25×40 cloth mesh for better vertical draping
+Selective constraint removal to simulate cutting
+Physical separation of cloth halves
+Smooth camera orbit with subtle oscillation
+Pin movement across the cloth surface
+
+Technical Approach
+Physics Engine
+The simulations use a Verlet integration approach combined with constraint-based dynamics:
+
+Particles: Each vertex in the cloth mesh is treated as a particle with position, previous position, and pinned state
+Constraints: Springs connecting adjacent particles maintain cloth structure
+
+Structural constraints (horizontal and vertical)
+Diagonal constraints (shear resistance)
+
+
+Verlet Integration: Position-based physics using position = 2 × current - previous + acceleration
+Constraint Solving: Iterative relaxation (3 iterations per frame) to satisfy distance constraints
+
+Cutting Mechanism
+The cloth cutting is achieved by:
+
+Identifying constraints that cross the cutting plane
+Removing these constraints from the physics system
+Physically separating particles on either side with a gap
+Storing grid coordinates (gridX, gridY) to track particle topology
+
+This approach allows the cloth to realistically split into two independent pieces that continue to simulate separately.
+Alternative Approaches Explored
+1. Rigid Body Slicing
+Initially attempted using rigid body physics with mesh boolean operations to slice geometry. This approach was abandoned because:
+
+Poor performance with complex mesh operations
+Difficult to maintain real-time frame rates
+Rigid bodies don't capture the fluid, flexible nature of cloth
+
+2. Cloth Dropping onto Pin
+Experimented with dropping cloth onto a stationary pin from above. This was less effective because:
+
+Hard to control initial conditions for consistent piercing
+Gravity-based approach made it difficult to showcase the cutting mechanics clearly
+Moving pin through stationary cloth provided better visual demonstration
+
+----------------------------------------------------------------------------------------------------------------------------------------------------
+LARGE SPHERE PIN:
+
+HTML:
+body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+JAVASCRIPT:
+let scene, camera, renderer, cloth, pin;
+        let particles = [];
+        let constraints = [];
+
+        const clothWidth = 30;
+        const clothHeight = 30;
+        const spacing = 0.03;
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0.5, 2);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 5);
+            scene.add(directionalLight);
+
+            // Create Pin
+            createPin();
+
+            // Create Cloth
+            createCloth();
+
+            // Handle resize
+            window.addEventListener('resize', onWindowResize);
+
+            // Start animation
+            animate();
+        }
+
+        function createPin() {
+            const pinGroup = new THREE.Group();
+
+            // Pin base (sphere)
+            const baseGeometry = new THREE.SphereGeometry(0.08, 16, 16);
+            const baseMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x888888,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.y = 0;
+            pinGroup.add(base);
+
+            // Pin shaft (cone - sharp tip)
+            const shaftGeometry = new THREE.ConeGeometry(0.01, 0.4, 8);
+            const shaftMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xcccccc,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+            shaft.position.y = 0.2;
+            pinGroup.add(shaft);
+
+            pinGroup.position.set(0, -0.3, 0);
+            scene.add(pinGroup);
+            pin = pinGroup;
+        }
+
+        function createCloth() {
+            // Create particle system
+            for (let y = 0; y < clothHeight; y++) {
+                for (let x = 0; x < clothWidth; x++) {
+                    const particle = {
+                        position: new THREE.Vector3(
+                            (x - clothWidth / 2) * spacing,
+                            0.5,
+                            y * spacing
+                        ),
+                        previous: new THREE.Vector3(
+                            (x - clothWidth / 2) * spacing,
+                            0.5,
+                            y * spacing
+                        ),
+                        pinned: y === 0 && x % 3 === 0
+                    };
+                    particles.push(particle);
+                }
+            }
+
+            // Create constraints (springs)
+            for (let y = 0; y < clothHeight; y++) {
+                for (let x = 0; x < clothWidth; x++) {
+                    const index = y * clothWidth + x;
+
+                    // Structural springs
+                    if (x < clothWidth - 1) {
+                        constraints.push({
+                            p1: index,
+                            p2: index + 1,
+                            restLength: spacing
+                        });
+                    }
+                    if (y < clothHeight - 1) {
+                        constraints.push({
+                            p1: index,
+                            p2: index + clothWidth,
+                            restLength: spacing
+                        });
+                    }
+
+                    // Diagonal springs
+                    if (x < clothWidth - 1 && y < clothHeight - 1) {
+                        constraints.push({
+                            p1: index,
+                            p2: index + clothWidth + 1,
+                            restLength: spacing * Math.sqrt(2)
+                        });
+                    }
+                    if (x > 0 && y < clothHeight - 1) {
+                        constraints.push({
+                            p1: index,
+                            p2: index + clothWidth - 1,
+                            restLength: spacing * Math.sqrt(2)
+                        });
+                    }
+                }
+            }
+
+            // Create cloth mesh
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particles.length * 3);
+            const indices = [];
+
+            particles.forEach((p, i) => {
+                positions[i * 3] = p.position.x;
+                positions[i * 3 + 1] = p.position.y;
+                positions[i * 3 + 2] = p.position.z;
+            });
+
+            for (let y = 0; y < clothHeight - 1; y++) {
+                for (let x = 0; x < clothWidth - 1; x++) {
+                    const a = y * clothWidth + x;
+                    const b = a + 1;
+                    const c = a + clothWidth;
+                    const d = c + 1;
+
+                    indices.push(a, b, c);
+                    indices.push(b, d, c);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x3366cc,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9,
+                shininess: 30
+            });
+
+            cloth = new THREE.Mesh(geometry, material);
+            scene.add(cloth);
+        }
+
+        function updatePhysics() {
+            const gravity = new THREE.Vector3(0, -0.002, 0);
+            const damping = 0.99;
+
+            // Update particles
+            particles.forEach(particle => {
+                if (particle.pinned) return;
+
+                const velocity = new THREE.Vector3()
+                    .subVectors(particle.position, particle.previous)
+                    .multiplyScalar(damping);
+
+                particle.previous.copy(particle.position);
+                particle.position.add(velocity).add(gravity);
+
+                // Wind effect
+                const wind = Math.sin(Date.now() * 0.001 + particle.position.x * 10) * 0.0005;
+                particle.position.z -= wind;
+
+                // Pin collision - only on the base, not the sharp tip
+                const pinBase = pin.position.clone();
+                const delta = new THREE.Vector3().subVectors(particle.position, pinBase);
+                const distance2D = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+
+                // Only collide with the base (radius 0.08), allowing the sharp tip to pierce through
+                if (distance2D < 0.08 && particle.position.y < pinBase.y + 0.1) {
+                    const diff = 0.08 - distance2D;
+                    const normal = new THREE.Vector3(delta.x, 0, delta.z).normalize();
+                    particle.position.add(normal.multiplyScalar(diff));
+                }
+            });
+
+            // Satisfy constraints multiple times for stability
+            for (let i = 0; i < 3; i++) {
+                constraints.forEach(constraint => {
+                    const p1 = particles[constraint.p1];
+                    const p2 = particles[constraint.p2];
+
+                    const delta = new THREE.Vector3().subVectors(p2.position, p1.position);
+                    const distance = delta.length();
+                    const diff = (distance - constraint.restLength) / distance;
+
+                    const offset = delta.multiplyScalar(diff * 0.5);
+
+                    if (!p1.pinned) p1.position.add(offset);
+                    if (!p2.pinned) p2.position.sub(offset);
+                });
+            }
+        }
+
+        function updateClothGeometry() {
+            const positions = cloth.geometry.attributes.position.array;
+
+            particles.forEach((particle, i) => {
+                positions[i * 3] = particle.position.x;
+                positions[i * 3 + 1] = particle.position.y;
+                positions[i * 3 + 2] = particle.position.z;
+            });
+
+            cloth.geometry.attributes.position.needsUpdate = true;
+            cloth.geometry.computeVertexNormals();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Move pin around
+            const time = Date.now() * 0.001;
+            pin.position.x = Math.sin(time * 0.8) * 0.15;
+            pin.position.z = Math.cos(time * 0.5) * 0.1;
+
+            // Update physics
+            updatePhysics();
+            updateClothGeometry();
+
+            // Slowly rotate camera
+            camera.position.x = Math.sin(time * 0.1) * 2;
+            camera.position.z = Math.cos(time * 0.1) * 2;
+            camera.lookAt(0, 0, 0);
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Start the application
+        init();
+CSS:
+body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+----------------------------------------------------------------------------------------------------------------------------------------------------
+SMALL SPHERE PIN:
+HTML:
+<div id="info">
+    <b>Cloth with Piercing Pin</b>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+JAVASCRIPT:
+let scene, camera, renderer, cloth, pin;
+let particles = [];
+let constraints = [];
+
+const clothWidth = 30;
+const clothHeight = 30;
+const spacing = 0.03;
+
+function init() {
+
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+
+    // Camera
+    camera = new THREE.PerspectiveCamera(
+        75, window.innerWidth / window.innerHeight, 0.1, 1000
+    );
+    camera.position.set(0, 0.5, 2);
+    camera.lookAt(0, 0, 0);
+
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+    const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dLight.position.set(5, 10, 5);
+    scene.add(dLight);
+
+    // Pin + Cloth
+    createPin();
+    createCloth();
+
+    window.addEventListener("resize", onWindowResize);
+    animate();
+}
+
+function createPin() {
+    const pinGroup = new THREE.Group();
+
+    // ---- Extremely Tiny Base Sphere ----
+    const baseGeometry = new THREE.SphereGeometry(0.015, 16, 16);  // << MUCH TINIER
+    const baseMaterial = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        metalness: 0.8,
+        roughness: 0.2
+    });
+    const base = new THREE.Mesh(baseGeometry, baseMaterial);
+    base.position.y = 0;
+    pinGroup.add(base);
+
+    // Shaft (Sharp tip)
+    const shaftGeometry = new THREE.ConeGeometry(0.01, 0.4, 8);
+    const shaftMaterial = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
+        metalness: 0.9,
+        roughness: 0.1
+    });
+    const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+    shaft.position.y = 0.2;
+    pinGroup.add(shaft);
+
+    pinGroup.position.set(0, -0.3, 0);
+    scene.add(pinGroup);
+    pin = pinGroup;
+}
+
+function createCloth() {
+
+    // Particles
+    for (let y = 0; y < clothHeight; y++) {
+        for (let x = 0; x < clothWidth; x++) {
+            const px = (x - clothWidth / 2) * spacing;
+            const py = 0.5;
+            const pz = y * spacing;
+
+            particles.push({
+                position: new THREE.Vector3(px, py, pz),
+                previous: new THREE.Vector3(px, py, pz),
+                pinned: y === 0 && x % 3 === 0
+            });
+        }
+    }
+
+    // Constraints
+    for (let y = 0; y < clothHeight; y++) {
+        for (let x = 0; x < clothWidth; x++) {
+            const i = y * clothWidth + x;
+
+            if (x < clothWidth - 1)
+                constraints.push({ p1: i, p2: i + 1, restLength: spacing });
+            if (y < clothHeight - 1)
+                constraints.push({ p1: i, p2: i + clothWidth, restLength: spacing });
+
+            if (x < clothWidth - 1 && y < clothHeight - 1)
+                constraints.push({ p1: i, p2: i + clothWidth + 1, restLength: spacing * Math.sqrt(2) });
+
+            if (x > 0 && y < clothHeight - 1)
+                constraints.push({ p1: i, p2: i + clothWidth - 1, restLength: spacing * Math.sqrt(2) });
+        }
+    }
+
+    // Geometry
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particles.length * 3);
+    const indices = [];
+
+    particles.forEach((p, i) => {
+        positions[i * 3] = p.position.x;
+        positions[i * 3 + 1] = p.position.y;
+        positions[i * 3 + 2] = p.position.z;
+    });
+
+    for (let y = 0; y < clothHeight - 1; y++) {
+        for (let x = 0; x < clothWidth - 1; x++) {
+            const a = y * clothWidth + x;
+            const b = a + 1;
+            const c = a + clothWidth;
+            const d = c + 1;
+            indices.push(a, b, c);
+            indices.push(b, d, c);
+        }
+    }
+
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    cloth = new THREE.Mesh(
+        geometry,
+        new THREE.MeshPhongMaterial({
+            color: 0x3366cc,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9,
+            shininess: 40
+        })
+    );
+    scene.add(cloth);
+}
+
+function updatePhysics() {
+
+    const gravity = new THREE.Vector3(0, -0.002, 0);
+    const damping = 0.99;
+
+    particles.forEach(p => {
+        if (p.pinned) return;
+
+        const velocity = p.position.clone().sub(p.previous).multiplyScalar(damping);
+
+        p.previous.copy(p.position);
+        p.position.add(velocity).add(gravity);
+
+        // Wind
+        const wind = Math.sin(Date.now() * 0.001 + p.position.x * 10) * 0.0005;
+        p.position.z -= wind;
+
+        // Pin Collision (ONLY with bottom sphere)
+        const pinBase = pin.position.clone();
+        const dx = p.position.x - pinBase.x;
+        const dz = p.position.z - pinBase.z;
+
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const radius = 0.015;  // updated
+
+        if (dist < radius && p.position.y < pinBase.y + 0.05) {
+            const diff = radius - dist;
+            const nx = dx / dist;
+            const nz = dz / dist;
+            p.position.x += nx * diff;
+            p.position.z += nz * diff;
+        }
+    });
+
+    // Solve constraints
+    for (let i = 0; i < 3; i++) {
+        constraints.forEach(c => {
+            const p1 = particles[c.p1];
+            const p2 = particles[c.p2];
+
+            const delta = p2.position.clone().sub(p1.position);
+            const dist = delta.length();
+            const diff = (dist - c.restLength) / dist;
+
+            delta.multiplyScalar(diff * 0.5);
+
+            if (!p1.pinned) p1.position.add(delta);
+            if (!p2.pinned) p2.position.sub(delta);
+        });
+    }
+}
+
+function updateClothGeometry() {
+    const pos = cloth.geometry.attributes.position.array;
+    particles.forEach((p, i) => {
+        pos[i * 3] = p.position.x;
+        pos[i * 3 + 1] = p.position.y;
+        pos[i * 3 + 2] = p.position.z;
+    });
+    cloth.geometry.attributes.position.needsUpdate = true;
+    cloth.geometry.computeVertexNormals();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    const t = Date.now() * 0.001;
+    pin.position.x = Math.sin(t * 0.8) * 0.15;
+    pin.position.z = Math.cos(t * 0.5) * 0.1;
+
+    updatePhysics();
+    updateClothGeometry();
+
+    camera.position.x = Math.sin(t * 0.1) * 2;
+    camera.position.z = Math.cos(t * 0.1) * 2;
+    camera.lookAt(0, 0, 0);
+
+    renderer.render(scene, camera);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+init();
+
+CSS:
+body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+----------------------------------------------------------------------------------------------------------------------------------------------------
+CLOTH SNIPPING:
+HTML:
+<div id="info">
+    <b>MESH MANIPULATION</b><br>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+JAVASCRIPT:
+let scene, camera, renderer;
+let cloth, particles = [], constraints = [];
+let pin;
+let hasCut = false;
+const clothW = 25;
+const clothH = 40;
+const spacing = 0.03;
+
+// Camera orbit variables
+let camAngle = 0;
+const camRadius = 1.2;
+const camHeight = 0.4;
+const camOscillation = 0.02;  // subtle up/down
+const camRadiusVariation = 0.02; // subtle in/out
+
+init();
+animate();
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x444444);
+
+    camera = new THREE.PerspectiveCamera(
+        60, window.innerWidth / window.innerHeight, 0.1, 100
+    );
+    camera.position.set(0, camHeight, camRadius);
+    camera.lookAt(0, 0.25, 0);
+
+    renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dl = new THREE.DirectionalLight(0xffffff, 1);
+    dl.position.set(2, 3, 2);
+    scene.add(dl);
+
+    createCloth();
+    createPin();
+
+    window.addEventListener("resize", onResize);
+}
+
+function createCloth() {
+    particles = [];
+    constraints = [];
+
+    const startY = 0.5;
+    const startX = -0.35;
+
+    for (let y = 0; y < clothH; y++) {
+        for (let x = 0; x < clothW; x++) {
+            const px = startX + x * spacing;
+            const py = startY - y * spacing;
+            const pz = 0;
+
+            particles.push({
+                pos: new THREE.Vector3(px, py, pz),
+                old: new THREE.Vector3(px, py, pz),
+                pinned: (y === 0 && x % 5 === 0)
+            });
+        }
+    }
+
+    for (let y = 0; y < clothH; y++) {
+        for (let x = 0; x < clothW; x++) {
+            const i = y * clothW + x;
+            if (x < clothW - 1) addConst(i, i+1);
+            if (y < clothH - 1) addConst(i, i+clothW);
+        }
+    }
+
+    const geom = new THREE.BufferGeometry();
+    const verts = new Float32Array(particles.length * 3);
+    const idx = [];
+
+    for (let i = 0; i < verts.length; i++) verts[i] = 0;
+
+    for (let y = 0; y < clothH - 1; y++) {
+        for (let x = 0; x < clothW - 1; x++) {
+            const a = y * clothW + x;
+            const b = a + 1;
+            const c = a + clothW;
+            const d = c + 1;
+            idx.push(a,b,c, b,d,c);
+        }
+    }
+
+    geom.setIndex(idx);
+    geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+    geom.computeVertexNormals();
+
+    cloth = new THREE.Mesh(
+        geom,
+        new THREE.MeshPhongMaterial({
+            color: 0x2277ff,
+            side: THREE.DoubleSide,
+            shininess: 40
+        })
+    );
+
+    scene.add(cloth);
+}
+
+function addConst(a,b) {
+    constraints.push({a, b, rest: spacing});
+}
+
+function createPin() {
+    const geom = new THREE.CylinderGeometry(0.01, 0.01, 0.6, 16);
+    const mat  = new THREE.MeshStandardMaterial({
+        color: 0xffffff, metalness: 0.9, roughness: 0.2
+    });
+
+    pin = new THREE.Mesh(geom, mat);
+    pin.rotation.z = Math.PI / 2;
+    pin.position.set(-1, 0.25, 0.02);
+    scene.add(pin);
+}
+
+function verlet() {
+    const gravity = new THREE.Vector3(0, -0.0007, 0);
+
+    particles.forEach(p => {
+        if (p.pinned) return;
+
+        const vel = p.pos.clone().sub(p.old);
+        p.old.copy(p.pos);
+        p.pos.add(vel).add(gravity);
+    });
+
+    for (let k=0; k<3; k++)
+    constraints.forEach(c => {
+        const p1 = particles[c.a];
+        const p2 = particles[c.b];
+
+        const delta = p2.pos.clone().sub(p1.pos);
+        const dist = delta.length();
+        const diff = (dist - c.rest) / dist;
+
+        if (!p1.pinned) p1.pos.addScaledVector(delta, 0.5 * diff);
+        if (!p2.pinned) p2.pos.addScaledVector(delta, -0.5 * diff);
+    });
+}
+
+function cutCloth() {
+    if (hasCut) return;
+
+    const CUT_GAP = 0.05;
+
+    for (let c = constraints.length - 1; c >= 0; c--) {
+        const p1 = particles[constraints[c].a].pos;
+        const p2 = particles[constraints[c].b].pos;
+
+        if (p1.x < pin.position.x && p2.x > pin.position.x ||
+            p2.x < pin.position.x && p1.x > pin.position.x)
+        {
+            constraints.splice(c,1);
+            p1.x -= CUT_GAP;
+            p2.x += CUT_GAP;
+        }
+    }
+
+    hasCut = true;
+}
+
+function updateGeometry() {
+    const arr = cloth.geometry.attributes.position.array;
+    for (let i=0; i<particles.length; i++) {
+        arr[i*3]   = particles[i].pos.x;
+        arr[i*3+1] = particles[i].pos.y;
+        arr[i*3+2] = particles[i].pos.z;
+    }
+    cloth.geometry.attributes.position.needsUpdate = true;
+    cloth.geometry.computeVertexNormals();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    // Move pin
+    if (pin.position.x < 0.45)
+        pin.position.x += 0.01;
+
+    if (pin.position.x > -0.2 && !hasCut)
+        cutCloth();
+
+    // --- CAMERA ROTATION WITH SUBTLE SPACE ---
+    camAngle += 0.01; 
+    const radius = camRadius + Math.sin(camAngle * 2) * camRadiusVariation; // slight in/out
+    const height = camHeight + Math.sin(camAngle * 1.5) * camOscillation;    // slight up/down
+
+    camera.position.x = Math.sin(camAngle) * radius;
+    camera.position.z = Math.cos(camAngle) * radius;
+    camera.position.y = height;
+    camera.lookAt(0, 0.25, 0);
+    // ----------------------------------------
+
+    verlet();
+    updateGeometry();
+
+    renderer.render(scene, camera);
+}
+
+function onResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+CSS:
+body { margin: 0; overflow: hidden; background: #111; }
+        #info {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.6); color: white;
+            padding: 10px; border-radius: 5px; z-index: 10;
+            font-family: Arial; font-size: 14px;
+        }
+----------------------------------------------------------------------------------------------------------------------------------------------------
+CLOTH CUTTING:
+HTML:
+<div id="info">
+        <b>Cloth Cutting</b><br>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+JAVASCRIPT:
+let scene, camera, renderer;
+        let cloth, particles = [], constraints = [];
+        let pin;
+        let hasCut = false;
+
+        const clothW = 25;
+        const clothH = 40;
+        const spacing = 0.03;
+
+        // Camera orbit variables
+        let camAngle = 0;
+        const camRadius = 1.2;
+        const camHeight = 0.4;
+        const camOscillation = 0.02;
+        const camRadiusVariation = 0.02;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x444444);
+
+            camera = new THREE.PerspectiveCamera(
+                60, window.innerWidth / window.innerHeight, 0.1, 100
+            );
+            camera.position.set(0, camHeight, camRadius);
+            camera.lookAt(0, 0.25, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dl = new THREE.DirectionalLight(0xffffff, 1);
+            dl.position.set(2, 3, 2);
+            scene.add(dl);
+
+            createCloth();
+            createPin();
+
+            window.addEventListener("resize", onResize);
+        }
+
+        function createCloth() {
+            particles = [];
+            constraints = [];
+
+            const startY = 0.5;
+            const startX = -0.35;
+
+            // Create particles
+            for (let y = 0; y < clothH; y++) {
+                for (let x = 0; x < clothW; x++) {
+                    const px = startX + x * spacing;
+                    const py = startY - y * spacing;
+                    const pz = 0;
+
+                    particles.push({
+                        pos: new THREE.Vector3(px, py, pz),
+                        old: new THREE.Vector3(px, py, pz),
+                        pinned: (y === 0 && x % 5 === 0),
+                        gridX: x,
+                        gridY: y
+                    });
+                }
+            }
+
+            // Create constraints
+            for (let y = 0; y < clothH; y++) {
+                for (let x = 0; x < clothW; x++) {
+                    const i = y * clothW + x;
+                    if (x < clothW - 1) addConst(i, i + 1);
+                    if (y < clothH - 1) addConst(i, i + clothW);
+                }
+            }
+
+            // Create geometry
+            const geom = new THREE.BufferGeometry();
+            const verts = new Float32Array(particles.length * 3);
+            const idx = [];
+
+            // Initialize vertices
+            particles.forEach((p, i) => {
+                verts[i * 3] = p.pos.x;
+                verts[i * 3 + 1] = p.pos.y;
+                verts[i * 3 + 2] = p.pos.z;
+            });
+
+            // Create indices for triangles
+            for (let y = 0; y < clothH - 1; y++) {
+                for (let x = 0; x < clothW - 1; x++) {
+                    const a = y * clothW + x;
+                    const b = a + 1;
+                    const c = a + clothW;
+                    const d = c + 1;
+                    idx.push(a, b, c);
+                    idx.push(b, d, c);
+                }
+            }
+
+            geom.setIndex(idx);
+            geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+            geom.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0xcc2222,
+                side: THREE.DoubleSide,
+                shininess: 40
+            });
+
+            cloth = new THREE.Mesh(geom, material);
+            scene.add(cloth);
+        }
+
+        function addConst(a, b) {
+            constraints.push({ a, b, rest: spacing });
+        }
+
+        function createPin() {
+            const geom = new THREE.CylinderGeometry(0.01, 0.01, 0.8, 16);
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0xffffff, 
+                metalness: 0.9, 
+                roughness: 0.2
+            });
+
+            pin = new THREE.Mesh(geom, mat);
+            pin.rotation.z = Math.PI / 2;
+            pin.position.set(-1, 0.25, 0.02);
+            scene.add(pin);
+        }
+
+        function verlet() {
+            const gravity = new THREE.Vector3(0, -0.0012, 0);
+
+            particles.forEach(p => {
+                if (p.pinned) return;
+
+                const vel = p.pos.clone().sub(p.old);
+                p.old.copy(p.pos);
+                p.pos.add(vel).add(gravity);
+            });
+
+            // Solve constraints
+            for (let k = 0; k < 3; k++) {
+                constraints.forEach(c => {
+                    const p1 = particles[c.a];
+                    const p2 = particles[c.b];
+
+                    const delta = p2.pos.clone().sub(p1.pos);
+                    const dist = delta.length();
+                    if (dist === 0) return;
+                    
+                    const diff = (dist - c.rest) / dist;
+
+                    if (!p1.pinned) p1.pos.addScaledVector(delta, 0.5 * diff);
+                    if (!p2.pinned) p2.pos.addScaledVector(delta, -0.5 * diff);
+                });
+            }
+        }
+
+        function cutCloth() {
+            if (hasCut) return;
+
+            // Cut through the middle column
+            const cutColumn = Math.floor(clothW / 2);
+            const GAP = 0.08;
+
+            // Remove all constraints connecting left and right halves
+            for (let i = constraints.length - 1; i >= 0; i--) {
+                const c = constraints[i];
+                const p1 = particles[c.a];
+                const p2 = particles[c.b];
+
+                // Check if constraint crosses the cut or is in the cut column
+                const crossesMiddle = (p1.gridX < cutColumn && p2.gridX >= cutColumn) ||
+                                     (p2.gridX < cutColumn && p1.gridX >= cutColumn);
+                
+                const inCutColumn = (p1.gridX === cutColumn || p2.gridX === cutColumn);
+
+                if (crossesMiddle || inCutColumn) {
+                    constraints.splice(i, 1);
+                }
+            }
+
+            // Separate the two halves
+            particles.forEach(p => {
+                if (p.gridX < cutColumn) {
+                    p.pos.x -= GAP;
+                    p.old.x -= GAP;
+                } else if (p.gridX >= cutColumn) {
+                    p.pos.x += GAP;
+                    p.old.x += GAP;
+                }
+            });
+
+            hasCut = true;
+        }
+
+        function updateGeometry() {
+            const arr = cloth.geometry.attributes.position.array;
+            for (let i = 0; i < particles.length; i++) {
+                arr[i * 3] = particles[i].pos.x;
+                arr[i * 3 + 1] = particles[i].pos.y;
+                arr[i * 3 + 2] = particles[i].pos.z;
+            }
+            cloth.geometry.attributes.position.needsUpdate = true;
+            cloth.geometry.computeVertexNormals();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Move pin through cloth
+            if (pin.position.x < 0.5) {
+                pin.position.x += 0.01;
+            }
+
+            // Cut when pin reaches center
+            if (pin.position.x > 0.0 && !hasCut) {
+                cutCloth();
+            }
+
+            // Camera rotation
+            camAngle += 0.008;
+            const radius = camRadius + Math.sin(camAngle * 2) * camRadiusVariation;
+            const height = camHeight + Math.sin(camAngle * 1.5) * camOscillation;
+
+            camera.position.x = Math.sin(camAngle) * radius;
+            camera.position.z = Math.cos(camAngle) * radius;
+            camera.position.y = height;
+            camera.lookAt(0, 0.25, 0);
+
+            // Update physics and render
+            verlet();
+            updateGeometry();
+            renderer.render(scene, camera);
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+CSS:
+body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #111; 
+        }
+        #info {
+            position: absolute; 
+            top: 10px; 
+            left: 10px;
+            background: rgba(0,0,0,0.6); 
+            color: white;
+            padding: 10px; 
+            border-radius: 5px; 
+            z-index: 10;
+            font-family: Arial; 
+            font-size: 14px;
+        }
+
