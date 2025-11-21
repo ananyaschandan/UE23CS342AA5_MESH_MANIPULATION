@@ -124,7 +124,6 @@ This project was created collaboratively by:
 - **Varhss04**  
 - **ananyaschandan**
 
-(Add their GitHub usernames once you add them as collaborators.)
 
 ---
 
